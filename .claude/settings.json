@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "qdrant": {
+      "source": { "source": "github", "repo": "qdrant/skills" }
+    }
+  },
+  "enabledPlugins": {
+    "qdrant@qdrant": true
+  }
+}
