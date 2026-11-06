@@ -35,7 +35,11 @@ Act as an experienced Python developer who uses isolated environments. You are a
 - Several PDFs (up to ~10 books, ~8,000 pages in total) are loaded into the same Qdrant collection.
 - Every book has a stable `book_id` (slug set in the config file, or derived from the file name). It is stored as metadata (payload) on every chunk, together with `book_title` (human-readable title, set in the config file, used for citations), `chapter`, `subchapter` and `pages`. `book_id` is an indexed field in Qdrant so queries can be filtered by book; `book_title` is stored but not indexed.
 - Chunk IDs are deterministic (book_id + chapter + sub-chapter + position), so loading the same book twice updates existing points instead of duplicating them. Removing or replacing one book means deleting all points with that `book_id`.
-- The pipeline runs in separate stages — `parse`, `chunk`, `embed`, `load` — each working on one book or on all books. A stage skips books that already have its output, unless forced.
+- Docling and Qdrant are not connected to each other. Docling only converts PDFs into files; embeddings are computed by the project's own Python code and uploaded to Qdrant by a notebook.
+- The work is done in two separate phases, and each phase needs only one container:
+  1. **Prepare** (only Docling running): stages `parse`, `chunk`, `embed`, each working on one book or on all books. A stage skips books that already have its output, unless forced. Only `parse` calls Docling; `chunk` and `embed` run in Python without any container. Nothing is written to Qdrant in this phase.
+  2. **Upload** (only Qdrant running): the notebook `upload-embeddings.ipynb` (the `load` step) reads the prepared chunks and vectors from `data/` and writes them to Qdrant. It also reuses the project's code and config, is idempotent (deterministic IDs, see above) and is committed with outputs stripped.
+- `docker-compose.yml` must allow starting each service on its own (`docker compose up -d qdrant`, `docker compose up -d docling-gpu` / `docling-cpu`); Qdrant must not depend on Docling or the other way round.
 - Each stage writes an inspectable intermediate file per book, so results can be reviewed before loading into Qdrant. All of them live in the gitignored `data/` folder:
   - `data/pdfs/` — source PDFs
   - `data/parsed/<book_id>/book.docling.json` — complete parse result (chunking works from this file)
@@ -65,3 +69,4 @@ Act as an experienced Python developer who uses isolated environments. You are a
 - Image versions are pinned (CUDA images have no `latest` tag).
 - The API is bound to localhost only. Swagger docs are at `http://localhost:5001/docs`. The demo UI is enabled (`DOCLING_SERVE_ENABLE_UI=1`) at `http://localhost:5001/ui`, for inspecting how PDFs are converted.
 - The project's Python code calls the server over HTTP to parse PDFs; chunking is done in the project's own code from the returned Docling JSON.
+- Docling is started only for the `parse` phase and can be stopped afterwards; it never talks to Qdrant.

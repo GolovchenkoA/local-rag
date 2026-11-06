@@ -13,7 +13,8 @@ Ask questions about technical PDF books and get answers with sources. Everything
 | Docling server in Docker (GPU / CPU profiles, UI) | ✅ Done (not yet tested on the target machine) |
 | Claude Code structure (`CLAUDE.md`, `.claude/skills/`) | ✅ Done |
 | Python project, virtual environment, config file | 🚧 Not implemented yet |
-| Pipeline: `parse` → `chunk` → `embed` → `load` | 🚧 Not implemented yet |
+| Phase 1 pipeline: `parse` → `chunk` → `embed` (files in `data/`) | 🚧 Not implemented yet |
+| Phase 2: `upload-embeddings.ipynb` (upload to Qdrant) | 🚧 Not implemented yet |
 | Jupyter notebook for questions and answers | 🚧 Not implemented yet |
 
 ---
@@ -23,7 +24,8 @@ Ask questions about technical PDF books and get answers with sources. Everything
 **Pipeline** (each stage writes an inspectable file per book):
 
 ```
-PDF ──parse──▶ Docling JSON + Markdown ──chunk──▶ chunks.jsonl ──embed──▶ vectors ──load──▶ Qdrant
+Phase 1 (Docling container only):  PDF ──parse──▶ Docling JSON + Markdown ──chunk──▶ chunks.jsonl ──embed──▶ vectors (files)
+Phase 2 (Qdrant container only):   vectors + chunks ──upload-embeddings.ipynb──▶ Qdrant
                                                                                             │
 question ──embed──▶ search top 10 ──▶ rerank ──▶ top 2 ──▶ Ollama (qwen3.5:9b) ──▶ answer + sources
 ```
@@ -106,21 +108,69 @@ All settings (book list with `book_id` and `book_title`, top-k = 10, rerank top-
 
 Qdrant and Docling are defined in [`docker-compose.yml`](docker-compose.yml). Run the commands from the project folder.
 
-### Option A: with the NVIDIA GPU
+**Docling and Qdrant are not connected to each other.** Docling only converts PDFs into files. The embeddings are computed by the project's Python code and uploaded to Qdrant by a separate notebook. So the work is done in two separate phases, and each phase starts only the container it needs:
+
+| Phase | What you do | Containers needed |
+|---|---|---|
+| 1. Prepare | Parse PDFs, chunk, compute embeddings (files in `data/`) | Docling (Qdrant not needed) |
+| 2. Upload | Upload the prepared embeddings with `upload-embeddings.ipynb`, then ask questions | Qdrant (Docling not needed) |
+
+### Option A: only Docling (phase 1: parse PDFs and prepare embeddings)
+
+Choose one Docling profile:
 
 ```powershell
-docker compose --profile gpu up -d
+docker compose up -d docling-gpu       # NVIDIA GPU
 ```
-
-### Option B: CPU only
 
 ```powershell
-docker compose --profile cpu up -d
+docker compose up -d docling-cpu       # CPU only
 ```
 
-Start **only one** of the two profiles, because both Docling services use port 5001. Qdrant starts with either command.
+Only one of the two can run, because both use port 5001. Docling is needed only for the `parse` stage; `chunk` and `embed` run in Python and do not need any container. Stop Docling when parsing is done (see section 6).
 
-> The first start downloads large images (the CUDA Docling image is about 11 GB).
+> The first start downloads a large image (the CUDA Docling image is about 11 GB).
+
+### Option B: only Qdrant (phase 2: upload embeddings and ask questions)
+
+```powershell
+docker compose up -d qdrant
+```
+
+Then run `upload-embeddings.ipynb` (🚧 not implemented yet) to write the prepared chunks and vectors into Qdrant. No Docling image is needed for this.
+
+### Option C: both at the same time
+
+Only if you want to inspect conversions in the Docling UI while Qdrant is running:
+
+```powershell
+docker compose --profile gpu up -d     # or: --profile cpu
+```
+
+The `--profile` form starts Qdrant together with the chosen Docling service.
+
+### Download the Docling image first (to watch the progress)
+
+`up -d` runs in the background and shows little while it downloads. To see the layer-by-layer download progress, pull the image manually before the first start, in the foreground:
+
+```powershell
+docker compose --profile gpu pull docling-gpu      # or: --profile cpu pull docling-cpu
+```
+
+Each layer shows its own progress bar. It can take many minutes for the CUDA image. If it is interrupted, run the same command again: finished layers are kept and the download resumes. Then start the services with the `up -d` command above, which now starts immediately.
+
+Check the downloaded images and their size:
+
+```powershell
+docker images
+```
+
+### Stop one service and keep the other
+
+```powershell
+docker compose stop docling-gpu        # or: docling-cpu
+docker compose stop qdrant             # data is kept
+```
 
 ### Check that everything is running
 
@@ -128,12 +178,12 @@ Start **only one** of the two profiles, because both Docling services use port 5
 docker compose ps
 ```
 
-| Service | URL |
-|---|---|
-| Qdrant dashboard | http://localhost:6333/dashboard |
-| Qdrant REST API | http://localhost:6333 |
-| Docling UI | http://localhost:5001/ui |
-| Docling API docs (Swagger) | http://localhost:5001/docs |
+| Service | URL | Started by |
+|---|---|---|
+| Qdrant dashboard | http://localhost:6333/dashboard | Option B or C |
+| Qdrant REST API | http://localhost:6333 | Option B or C |
+| Docling UI | http://localhost:5001/ui | Option A or C |
+| Docling API docs (Swagger) | http://localhost:5001/docs | Option A or C |
 
 All ports are bound to localhost only.
 
@@ -150,6 +200,22 @@ Qdrant data lives in the named Docker volumes `local-rag-qdrant-storage` and `lo
 ---
 
 ## 4. Upload a PDF and validate the result
+
+### 4.0 Put your PDFs in `data/pdfs/`
+
+Copy the source books into the `data/pdfs/` folder in the project root:
+
+```
+data/pdfs/<book>.pdf
+```
+
+The folder is gitignored (like the whole `data/` folder and all `*.pdf` files), so it exists only on your machine. If it is missing after a fresh clone, create it:
+
+```powershell
+New-Item -ItemType Directory -Force data\pdfs
+```
+
+The `parse` stage (not implemented yet) will read the PDFs from this folder. The `book_id` is set in the config file, or derived from the file name.
 
 ### 4.1 Check the conversion in the Docling UI (available now)
 
@@ -168,18 +234,25 @@ The full JSON (with page numbers) is also available through the API docs at http
 
 ### 4.2 Run the pipeline 🚧 Not implemented yet
 
-Planned stages, each working on one book or all books, and each skipped for books that already have its output unless forced:
+Planned stages, each working on one book or all books, and each skipped for books that already have its output unless forced. The stages run in two separate phases:
+
+**Phase 1: prepare (only Docling is running, Option A in section 3).** Files only, nothing is written to Qdrant.
 
 | Stage | What it does | Output to inspect |
 |---|---|---|
-| `parse` | PDF → Docling JSON and Markdown | `data/parsed/<book_id>/book.md` |
-| `chunk` | Structure-aware chunks with metadata | `data/chunks/<book_id>/chunks.jsonl` |
-| `embed` | Vectors for each chunk | `data/embeddings/<book_id>/` |
-| `load` | Write chunks and vectors to Qdrant | Qdrant dashboard |
+| `parse` | PDF → Docling JSON and Markdown (calls the Docling container) | `data/parsed/<book_id>/book.md` |
+| `chunk` | Structure-aware chunks with metadata (Python only) | `data/chunks/<book_id>/chunks.jsonl` |
+| `embed` | Vectors for each chunk with `bge-m3` (Python only, CUDA with CPU fallback) | `data/embeddings/<book_id>/` |
+
+**Phase 2: upload (only Qdrant is running, Option B in section 3).**
+
+| Step | What it does | Output to inspect |
+|---|---|---|
+| `upload-embeddings.ipynb` (`load`) | Reads the prepared chunks and vectors from `data/` and writes them to Qdrant | Qdrant dashboard |
 
 Recommended order: process **one chapter or one book first**, inspect the `.md` and `chunks.jsonl`, fix settings, and only then run all books.
 
-### 4.3 Check the data in Qdrant (after `load` exists)
+### 4.3 Check the data in Qdrant (after `upload-embeddings.ipynb` exists)
 
 1. Open http://localhost:6333/dashboard.
 2. Open **Collections** and select the collection.
