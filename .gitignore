@@ -1,0 +1,21 @@
+# Python / virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# Data, models, embeddings – never commit
+data/
+models/
+cache/
+*.pdf
+qdrant_data/
+*.gguf
+*.safetensors
+*.bin
+*.onnx

@@ -1,0 +1,67 @@
+# Local RAG – Project Requirements
+
+## Role
+Act as an experienced Python developer who uses isolated environments. You are also an experienced RAG developer.
+
+## Repository rules
+- This folder is the root of the whole git project.
+- The repository must contain only source code and configuration files.
+- Never commit models, embeddings, vector-database data, parsed/cached documents, source PDFs, virtual environments or any other generated/large data (enforced via `.gitignore`).
+
+## Python
+- Use Python 3.14.7.
+- Use an isolated virtual environment; dependencies are declared in the project, never installed globally.
+
+## Vector database: Qdrant (Docker)
+- Qdrant runs in a Docker container defined in `docker-compose.yml`.
+- All Qdrant data (collections and snapshots) must survive `docker stop` / `docker start`
+  (and `docker compose down` / `up`). Data is kept in named Docker volumes, outside the git repository.
+- Ports are bound to localhost only: 6333 (HTTP/REST + dashboard), 6334 (gRPC).
+- The Qdrant image version is pinned (no `latest`).
+
+## Hardware acceleration: CUDA with CPU fallback
+- Every component that can use a GPU (PDF parsing with Docling, embedding model, reranker, any PyTorch code) must try CUDA first and automatically fall back to CPU if CUDA is not available.
+- Device selection is done in one place (a shared helper / config setting, e.g. `device: auto | cuda | cpu`) and the chosen device is logged at startup.
+- Ollama manages its own GPU usage (uses CUDA when available, otherwise CPU).
+- Target machine: Intel i9-14900HX, 32 GB RAM, NVIDIA GeForce RTX 5060 Laptop (8 GB VRAM) — PyTorch must be a CUDA 12.8+ build (Blackwell support).
+
+## PDF parsing (Docling)
+- Source PDFs are born-digital (they contain a text layer), so OCR is disabled (`do_ocr: false`) by default.
+- OCR must stay configurable in the config file (engine and languages), so it can be switched on later for scanned PDFs or code embedded as images. Preferred engine in that case: EasyOCR (CUDA with CPU fallback), explicit languages, never `auto`.
+- Images and diagrams in the PDFs are skipped during parsing: no image extraction, no OCR of bitmaps, no picture description. Only the text layer is used (this includes figure captions and the text around the figures).
+- These switches stay configurable in the config file, all off by default: `extract_images`, `ocr_bitmaps`, `describe_pictures`.
+
+## Multiple books and intermediate files
+- Several PDFs (up to ~10 books, ~8,000 pages in total) are loaded into the same Qdrant collection.
+- Every book has a stable `book_id` (slug set in the config file, or derived from the file name). It is stored as metadata (payload) on every chunk, together with `book_title` (human-readable title, set in the config file, used for citations), `chapter`, `subchapter` and `pages`. `book_id` is an indexed field in Qdrant so queries can be filtered by book; `book_title` is stored but not indexed.
+- Chunk IDs are deterministic (book_id + chapter + sub-chapter + position), so loading the same book twice updates existing points instead of duplicating them. Removing or replacing one book means deleting all points with that `book_id`.
+- The pipeline runs in separate stages — `parse`, `chunk`, `embed`, `load` — each working on one book or on all books. A stage skips books that already have its output, unless forced.
+- Each stage writes an inspectable intermediate file per book, so results can be reviewed before loading into Qdrant. All of them live in the gitignored `data/` folder:
+  - `data/pdfs/` — source PDFs
+  - `data/parsed/<book_id>/book.docling.json` — complete parse result (chunking works from this file)
+  - `data/parsed/<book_id>/book.md` — readable Markdown export, for inspection only
+  - `data/chunks/<book_id>/chunks.jsonl` — one chunk per line: text, metadata, parent ID
+  - `data/embeddings/<book_id>/` — optional vector cache
+
+## Jupyter notebook: question answering over the RAG
+- JupyterLab is a dev dependency of the project's virtual environment. The notebook imports the project's own code and config (Qdrant URL, device helper, embedding and reranker wrappers) instead of duplicating it. Notebooks are committed with outputs stripped (e.g. `nbstripout`).
+- The notebook provides a query field where the user types a question, and then runs this flow:
+  1. Embed the query (same model as the chunks: `bge-m3`, dense + sparse).
+  2. Search Qdrant (hybrid) and retrieve the **top 10** most similar chunks.
+  3. **Rerank** the 10 results with the reranker model.
+  4. Keep the **top 2** reranked chunks as context.
+  5. Send the question and the 2 chunks to the Ollama model **`qwen3.5:9b`** to generate the answer.
+- The model's answer is limited to **1000 tokens** (`num_predict: 1000`).
+- System prompt of the model: `You are an experienced ML Engineer that answers questions from RAG. Response should contain "answer" and source list from the RAG metadata response`
+- The response shown in the notebook contains an `answer` and a list of `sources`. The sources are built from the metadata of the 2 chunks used as context (`book_title`, `book_id`, `chapter`, `subchapter`, `pages`).
+- Top-k retrieved (10), top-n after reranking (2), the model name, the token limit and the system prompt are set in the config file, not hard-coded in the notebook.
+- Embedding model and reranker use CUDA with CPU fallback (shared device helper). The reranker and query embedder may run on the CPU to leave VRAM for the Ollama model.
+- Experiments and write operations use a separate test collection, not the main one.
+
+## Docling server (Docker)
+- Docling runs as the official `docling-serve` container, defined in `docker-compose.yml` next to Qdrant, with two profiles (only one is started at a time, both use port 5001):
+  - `gpu`: NVIDIA GPU, CUDA 12.8 image (`docling-serve-cu128`). Requires an NVIDIA driver and the NVIDIA Container Toolkit (or Docker Desktop with WSL2 GPU support).
+  - `cpu`: CPU-only image (`docling-serve-cpu`), used when no GPU is available.
+- Image versions are pinned (CUDA images have no `latest` tag).
+- The API is bound to localhost only. Swagger docs are at `http://localhost:5001/docs`. The demo UI is enabled (`DOCLING_SERVE_ENABLE_UI=1`) at `http://localhost:5001/ui`, for inspecting how PDFs are converted.
+- The project's Python code calls the server over HTTP to parse PDFs; chunking is done in the project's own code from the returned Docling JSON.

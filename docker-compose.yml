@@ -1,0 +1,53 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.2   # pinned; bump deliberately
+    container_name: local-rag-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"   # HTTP/REST API + dashboard (http://localhost:6333/dashboard)
+      - "127.0.0.1:6334:6334"   # gRPC API
+    volumes:
+      - qdrant_storage:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+
+  # Docling PDF parser. Start exactly ONE of the two profiles (both use port 5001):
+  #   docker compose --profile gpu up -d     # NVIDIA GPU (CUDA 12.8 image)
+  #   docker compose --profile cpu up -d     # CPU only
+  # (Qdrant has no profile, so it starts with either command.)
+  docling-gpu:
+    profiles: ["gpu"]
+    image: quay.io/docling-project/docling-serve-cu128:v1.38.0   # pinned; CUDA images have no :latest tag
+    container_name: local-rag-docling
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"   # API, Swagger docs at /docs, demo UI at /ui
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+      # DOCLING_DEVICE is left unset = automatic (CUDA when available, otherwise CPU)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  docling-cpu:
+    profiles: ["cpu"]
+    image: quay.io/docling-project/docling-serve-cpu:v1.38.0   # pinned
+    container_name: local-rag-docling
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+      DOCLING_DEVICE: "cpu"
+
+# Named volumes: Qdrant data survives docker stop/start and compose down/up,
+# and is stored outside the git repository.
+# Only `docker compose down -v` removes it.
+volumes:
+  qdrant_storage:
+    name: local-rag-qdrant-storage
+  qdrant_snapshots:
+    name: local-rag-qdrant-snapshots
