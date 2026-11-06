@@ -5,6 +5,9 @@ __pycache__/
 venv/
 .env
 
+# Claude Code (personal settings only; skills and CLAUDE.md are committed)
+.claude/settings.local.json
+
 # IDE
 .idea/
 .vscode/

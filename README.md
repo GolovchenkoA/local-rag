@@ -11,6 +11,7 @@ Ask questions about technical PDF books and get answers with sources. Everything
 |---|---|
 | Qdrant in Docker (persistent data) | ✅ Done (not yet tested on the target machine) |
 | Docling server in Docker (GPU / CPU profiles, UI) | ✅ Done (not yet tested on the target machine) |
+| Claude Code structure (`CLAUDE.md`, `.claude/skills/`) | ✅ Done |
 | Python project, virtual environment, config file | 🚧 Not implemented yet |
 | Pipeline: `parse` → `chunk` → `embed` → `load` | 🚧 Not implemented yet |
 | Jupyter notebook for questions and answers | 🚧 Not implemented yet |
