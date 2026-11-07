@@ -324,11 +324,26 @@ Recommended order: process **one book first**, inspect the `.md` and `chunks.jso
 
 ### 4.3 Upload to Qdrant
 
-Start only Qdrant (`docker compose up -d qdrant`), then open the notebook:
+Start only Qdrant (`docker compose up -d qdrant`), then open the notebook in JupyterLab. Use `python -m jupyter` (with the virtual environment active) instead of the `jupyter.exe` launcher: on some Windows machines the Application Control policy blocks that `.exe` (error `WinError 4551`), while `python.exe` is allowed:
 
 ```powershell
-jupyter lab notebooks/upload-embeddings.ipynb
+python -m jupyter lab notebooks/upload-embeddings.ipynb
 ```
+
+**Jupyter fails with `PermissionError ... AppData\Roaming\jupyter\runtime\jpserver-...-open.html`, or the notebook shows "queued" in PyCharm:** Jupyter cannot write to its runtime folder `C:\Users\<you>\AppData\Roaming\jupyter\runtime` (on one machine that folder had broken permissions: even `ls` was denied). Point Jupyter at a folder you own. For one terminal session:
+
+```powershell
+$env:JUPYTER_RUNTIME_DIR = "$env:LOCALAPPDATA\jupyter\runtime"
+python -m jupyter lab --no-browser
+```
+
+To make it permanent for your Windows user (restart PyCharm afterwards):
+
+```powershell
+setx JUPYTER_RUNTIME_DIR "%LOCALAPPDATA%\jupyter\runtime"
+```
+
+Alternatively repair the permissions of the original folder from an administrator PowerShell (`takeown /f "$env:APPDATA\jupyter" /r /d y`, then `icacls "$env:APPDATA\jupyter" /grant "$env:USERNAME:(OI)(CI)F" /t`). The kernel itself works with this `.venv` (checked headless: it starts in about 2 seconds).
 
 The notebook targets the **test collection** (`rag_test`) by default and has a safety flag: the upload cell runs with `DRY_RUN = True`, which only checks that the chunks and vectors match and reports what would be uploaded. Set `DRY_RUN = False` to write. The collection gets the named vector `dense` (1024 dimensions, cosine) and payload indexes on `book_id` and `position`. Re-running replaces the book's points, so changed chunking never leaves old points behind.
 
