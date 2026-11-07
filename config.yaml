@@ -1,0 +1,79 @@
+# Local RAG configuration. All tunable values live here, never hard-coded.
+# Paths are relative to the project folder.
+
+# Hardware: auto = CUDA when available, otherwise CPU. Chosen device is logged at startup.
+device: auto            # auto | cuda | cpu
+
+paths:
+  data_dir: data        # gitignored; create the sub-folders with scripts/init_data.py
+
+# --- Docling server (phase 1: parse and chunk) --------------------------------
+docling:
+  url: http://localhost:5001
+  timeout_seconds: 900
+  convert:
+    # Source PDFs are born-digital: OCR off. Switch on later for scanned PDFs.
+    do_ocr: false
+    ocr_engine: easyocr         # used only when do_ocr is true
+    ocr_languages: [en]         # explicit languages, never auto
+    # Images and diagrams are skipped (text layer only). All off by default.
+    include_images: false       # extract_images
+    do_picture_description: false  # describe_pictures
+    # Infer heading levels (chapter > section > subsection) from bookmarks/numbering/font style.
+    # Without it every heading is level 1 and the hierarchy is flat.
+    do_pdf_heading_hierarchy: true
+
+# --- Chunking (done by the Docling hybrid chunker, then post-processed) --------
+chunking:
+  tokenizer: BAAI/bge-m3        # same tokenizer as the embedding model
+  max_tokens: 600               # upper limit per chunk, headings included; no overlap
+  merge_peers: true
+  chunker_version: hybrid-1     # stored on every point; bump when chunking rules change
+  skip_chunks_without_headings: true   # table of contents pages have no headings
+
+# --- Embeddings ----------------------------------------------------------------
+embedding:
+  model: BAAI/bge-m3            # dense vectors only for now (1024 dimensions)
+  batch_size: 16
+  max_seq_length: 1024          # chunks are at most 600 tokens
+  normalize: true
+  device: auto                  # auto | cuda | cpu (overrides the global device)
+
+# --- Qdrant (phase 2: upload) --------------------------------------------------
+qdrant:
+  url: http://localhost:6333
+  collection: rag_books         # main collection
+  test_collection: rag_test     # experiments and write tests use this one
+  vector_name: dense            # named vector; a sparse vector can be added later
+  distance: Cosine
+  upload_batch_size: 64
+
+# --- Books ---------------------------------------------------------------------
+# book_id: stable slug, stored on every chunk. book_title: used in citations.
+# skip_top_headings: chunks whose first heading is listed here are not loaded
+# (title page, index, ...).
+books:
+  - file: book.pdf
+    book_id: ml-design-patterns
+    book_title: Machine Learning Design Patterns
+    skip_top_headings:
+      - Machine Learning Design Patterns
+      - Index
+
+# --- Question answering notebook (not implemented yet) -------------------------
+qa:
+  retrieve_top_k: 10
+  rerank_top_n: 2
+  score_threshold: 0.7          # normalized reranker score; below it: "not found in the books"
+  reranker_model: BAAI/bge-reranker-v2-m3   # suggestion, not yet decided
+  ollama:
+    model: qwen3.5:9b
+    num_predict: 1000
+    num_ctx: 6144               # to be confirmed; must fit chunks + question + answer
+  system_prompt: >-
+    You are an experienced ML Engineer that answers questions from RAG.
+    Response should contain "answer" and source list from the RAG metadata response.
+    Use only the information from the retrieved chunks and never guess.
+    You may summarize or combine information from different chunks when appropriate,
+    but never add anything of your own that is not in the chunks.
+    If the chunks do not contain the answer, say that the answer is not in the books.

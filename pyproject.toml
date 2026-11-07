@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-rag"
+version = "0.1.0"
+description = "Local RAG over technical PDF books: Docling, bge-m3, Qdrant, Ollama"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.27",
+    "pyyaml>=6",
+    "numpy>=2",
+    "qdrant-client>=1.15",
+    "sentence-transformers>=5",
+    "tqdm>=4.66",
+]
+# PyTorch is NOT listed here: it must be the CUDA 12.8 build (RTX 50-series),
+# installed first from the PyTorch index. See README section 2.2.
+
+[project.optional-dependencies]
+dev = [
+    "jupyterlab>=4",
+    "ipykernel>=6",
+    "nbstripout>=0.8",
+    "pytest>=8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

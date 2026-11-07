@@ -12,9 +12,9 @@ Ask questions about technical PDF books and get answers with sources. Everything
 | Qdrant in Docker (persistent data) | ✅ Done (not yet tested on the target machine) |
 | Docling server in Docker (GPU / CPU profiles, UI) | ✅ Done (not yet tested on the target machine) |
 | Claude Code structure (`CLAUDE.md`, `.claude/skills/`) | ✅ Done |
-| Python project, virtual environment, config file | 🚧 Not implemented yet |
-| Phase 1 pipeline: `parse` → `chunk` → `embed` (files in `data/`) | 🚧 Not implemented yet |
-| Phase 2: `upload-embeddings.ipynb` (upload to Qdrant) | 🚧 Not implemented yet |
+| Python project, virtual environment, config file | ✅ Done (`pyproject.toml`, `config.yaml`, `.venv`) |
+| Phase 1 pipeline: `parse` → `chunk` → `embed` (files in `data/`) | ✅ Code done; run on the first book (see section 4.2) |
+| Phase 2: `upload-embeddings.ipynb` (upload to Qdrant) | ✅ Notebook written, **not run yet** (nothing uploaded) |
 | Jupyter notebook for questions and answers | 🚧 Not implemented yet |
 
 ---
@@ -82,17 +82,36 @@ nvidia-smi                  # GPU and driver version
 ollama --version
 ```
 
-### 2.2 Virtual environment 🚧 Not implemented yet
+### 2.2 Virtual environment
 
-The dependency file does not exist yet. When it is added, the setup will be:
+Dependencies are declared in [`pyproject.toml`](pyproject.toml). PyTorch is **not** listed there: it must be the CUDA 12.8 build (needed for the RTX 50-series), so install it first from the PyTorch index. Run from the project folder:
 
 ```powershell
 py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-# pip install ...   (command will be added with the dependency file)
 ```
 
-PyTorch must be a CUDA 12.8+ build (needed for the RTX 50-series). All components try CUDA first and fall back to the CPU if it is not available.
+```powershell
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+```
+
+```powershell
+pip install -e ".[dev]"
+```
+
+`[dev]` adds JupyterLab, `nbstripout` and `pytest`. Check the GPU:
+
+```powershell
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+Install the notebook output stripper once per clone (notebooks are committed without outputs; `.gitattributes` is already in the repository):
+
+```powershell
+nbstripout --install --attributes .gitattributes
+```
+
+All components try CUDA first and fall back to the CPU if it is not available (`src/local_rag/device.py`, setting `device` in `config.yaml`). The chosen device is logged at startup. Run the tests with `pytest`.
 
 ### 2.3 Ollama models
 
@@ -100,11 +119,23 @@ PyTorch must be a CUDA 12.8+ build (needed for the RTX 50-series). All component
 ollama pull qwen3.5:9b
 ```
 
-The embedding model and the reranker are downloaded by Python code on first use (🚧 not implemented yet).
+The embedding model `BAAI/bge-m3` (about 2.2 GB) is downloaded by Python code from Hugging Face on the first `embed` run. The reranker is not used yet (🚧 question answering notebook not implemented yet).
 
-### 2.4 Configuration file 🚧 Not implemented yet
+### 2.4 Configuration file
 
-All settings (book list with `book_id` and `book_title`, top-k = 10, rerank top-n = 2, model name, token limit = 1000, system prompt, device, OCR and image switches) will live in one config file. This section will describe it.
+All settings live in [`config.yaml`](config.yaml): device, Docling URL and conversion switches (OCR off, images off, heading hierarchy on), chunking (tokenizer `BAAI/bge-m3`, max 600 tokens, no overlap), embedding model and batch size, Qdrant URL and collection names (`rag_books` main, `rag_test` for experiments), the **book list**, and the settings for the future question answering notebook (top-k 10, rerank top-n 2, score threshold 0.7, Ollama model, 1000 answer tokens, system prompt).
+
+Each book is one entry:
+
+```yaml
+books:
+  - file: book.pdf                 # file name in data/pdfs/
+    book_id: ml-design-patterns    # stable slug, stored on every chunk
+    book_title: Machine Learning Design Patterns
+    skip_top_headings:             # chunks starting with these headings are not loaded
+      - Machine Learning Design Patterns
+      - Index
+```
 
 ---
 
@@ -131,7 +162,7 @@ docker compose up -d docling-gpu       # NVIDIA GPU
 docker compose up -d docling-cpu       # CPU only
 ```
 
-Only one of the two can run, because both use port 5001. Docling is needed only for the `parse` stage; `chunk` and `embed` run in Python and do not need any container. Stop Docling when parsing is done (see section 6).
+Only one of the two can run, because both use port 5001. Docling is needed by the `parse` and `chunk` stages, because they call the server (the `chunk` stage does not need it when the raw chunker response is already saved in `data/parsed/<book_id>/chunks.raw.json`). The `embed` stage runs in Python and needs no container. Stop Docling when these stages are done (see section 6).
 
 > The first start downloads a large image (the CUDA Docling image is about 11 GB).
 
@@ -141,7 +172,7 @@ Only one of the two can run, because both use port 5001. Docling is needed only 
 docker compose up -d qdrant
 ```
 
-Then run `upload-embeddings.ipynb` (🚧 not implemented yet) to write the prepared chunks and vectors into Qdrant. No Docling image is needed for this.
+Then run [`notebooks/upload-embeddings.ipynb`](notebooks/upload-embeddings.ipynb) to write the prepared chunks and vectors into Qdrant (section 4.3). No Docling image is needed for this.
 
 ### Option C: both at the same time
 
@@ -240,27 +271,68 @@ Use this to see how a PDF is converted before running the whole pipeline.
 
 The full JSON (with page numbers) is also available through the API docs at http://localhost:5001/docs.
 
-### 4.2 Run the pipeline 🚧 Not implemented yet
+### 4.2 Run the pipeline
 
-Planned stages, each working on one book or all books, and each skipped for books that already have its output unless forced. The stages run in two separate phases:
+Each stage works on one book or on all books and is skipped for books that already have its output, unless forced with `--force`. Run from the project folder with the virtual environment active:
+
+```powershell
+python -m local_rag <stage> --book <book_id|all> [--force]
+```
 
 **Phase 1: prepare (only Docling is running, Option A in section 3).** Files only, nothing is written to Qdrant.
 
 | Stage | What it does | Output to inspect |
 |---|---|---|
 | `parse` | PDF → Docling JSON and Markdown (calls the Docling container) | `data/parsed/<book_id>/book.md` |
-| `chunk` | Structure-aware chunks with metadata (Python only) | `data/chunks/<book_id>/chunks.jsonl` |
-| `embed` | Vectors for each chunk with `bge-m3` (Python only, CUDA with CPU fallback) | `data/embeddings/<book_id>/` |
+| `chunk` | The Docling hybrid chunker (max 600 tokens, headings in the text) is called, then the result is post-processed: project fields added, front matter and index dropped (`skip_top_headings`), callout labels `TIP`/`NOTE`/`WARNING` kept. Raw response saved as `chunks.raw.json`. | `data/chunks/<book_id>/chunks.jsonl` |
+| `embed` | Dense vectors for every chunk with `bge-m3` (CUDA with CPU fallback). Needs no container. | `data/embeddings/<book_id>/dense.npy` and `meta.json` |
+
+Example, for the book configured in `config.yaml` (the PDF is `data/pdfs/book.pdf`):
+
+```powershell
+docker compose up -d docling-gpu
+```
+
+```powershell
+python -m local_rag parse --book ml-design-patterns
+```
+
+```powershell
+python -m local_rag chunk --book ml-design-patterns
+```
+
+```powershell
+docker compose stop docling-gpu
+```
+
+```powershell
+python -m local_rag embed --book ml-design-patterns
+```
+
+What the files contain:
+- **`chunks.jsonl`**: one chunk per line with `id` (UUIDv5 from `book_id` + heading path + position), `book_id`, `book_title`, `chapter`, `headings` (full path), `pages` (PDF page numbers), `position`, `token_count`, `type`, `chunker_version` and `text` (headings + body).
+- **`dense.npy`**: float32 matrix, one 1024-dimension vector per chunk, in the same order as `chunks.jsonl`.
+- **`meta.json`**: the model name, dimension, count, chunk IDs in order and a hash of `chunks.jsonl`. It lets `embed` skip finished work and lets the upload notebook refuse vectors that do not match the chunks.
+
+Recommended order: process **one book first**, inspect the `.md` and `chunks.jsonl`, fix settings, and only then run all books.
 
 **Phase 2: upload (only Qdrant is running, Option B in section 3).**
 
 | Step | What it does | Output to inspect |
 |---|---|---|
-| `upload-embeddings.ipynb` (`load`) | Reads the prepared chunks and vectors from `data/` and writes them to Qdrant | Qdrant dashboard |
+| `notebooks/upload-embeddings.ipynb` | Reads the prepared chunks and vectors from `data/`, creates the collection and uploads | Qdrant dashboard |
 
-Recommended order: process **one chapter or one book first**, inspect the `.md` and `chunks.jsonl`, fix settings, and only then run all books.
+### 4.3 Upload to Qdrant
 
-### 4.3 Check the data in Qdrant (after `upload-embeddings.ipynb` exists)
+Start only Qdrant (`docker compose up -d qdrant`), then open the notebook:
+
+```powershell
+jupyter lab notebooks/upload-embeddings.ipynb
+```
+
+The notebook targets the **test collection** (`rag_test`) by default and has a safety flag: the upload cell runs with `DRY_RUN = True`, which only checks that the chunks and vectors match and reports what would be uploaded. Set `DRY_RUN = False` to write. The collection gets the named vector `dense` (1024 dimensions, cosine) and payload indexes on `book_id` and `position`. Re-running replaces the book's points, so changed chunking never leaves old points behind.
+
+### 4.4 Check the data in Qdrant
 
 1. Open http://localhost:6333/dashboard.
 2. Open **Collections** and select the collection.

@@ -22,3 +22,5 @@ qdrant_data/
 *.safetensors
 *.bin
 *.onnx
+*.egg-info/
+.pytest_cache/

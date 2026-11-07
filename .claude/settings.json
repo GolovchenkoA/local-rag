@@ -6,5 +6,19 @@
   },
   "enabledPlugins": {
     "qdrant@qdrant": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m pytest:*)",
+      "Bash(.venv/Scripts/python.exe -m local_rag:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(ls:*)",
+      "Bash(du:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(echo:*)"
+    ]
   }
 }

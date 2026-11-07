@@ -35,7 +35,7 @@ Act as an experienced Python developer who uses isolated environments. You are a
 - Several PDFs (up to ~10 books, ~8,000 pages in total) are loaded into the same Qdrant collection.
 - Every book has a stable `book_id` (slug set in the config file, or derived from the file name). It is stored as metadata (payload) on every chunk, together with `book_title` (human-readable title, set in the config file, used for citations), `chapter` (first heading), `headings` (the full heading path as a list, any depth; headings also appear in the chunk text before embedding), `pages` and `position` (order of the chunk in the book, used to find neighbouring chunks). There is no `parent_id`. `book_id` and `position` are indexed fields in Qdrant (filter by book, fetch neighbours by range); `book_title` is stored but not indexed. The vector is stored as the named vector `dense`.
 - Chunks are at most 600 tokens, counted with the `bge-m3` tokenizer (config value), with no overlap. Chunks follow section boundaries; neighbouring chunks are added at answer time by the notebook.
-- Chunk IDs are deterministic (book_id + full heading path + position), so loading the same book twice updates existing points instead of duplicating them. Removing or replacing one book means deleting all points with that `book_id`.
+- Chunk IDs are deterministic (UUIDv5 from book_id + full heading path + position, fixed project namespace), so loading the same book twice updates existing points instead of duplicating them. Removing or replacing one book means deleting all points with that `book_id`.
 - Docling and Qdrant are not connected to each other. Docling only converts PDFs into files; embeddings are computed by the project's own Python code and uploaded to Qdrant by a notebook.
 - The work is done in two separate phases, and each phase needs only one container:
   1. **Prepare** (only Docling running): stages `parse`, `chunk`, `embed`, each working on one book or on all books. A stage skips books that already have its output, unless forced. Only `parse` calls Docling; `chunk` and `embed` run in Python without any container. Nothing is written to Qdrant in this phase.
@@ -46,7 +46,7 @@ Act as an experienced Python developer who uses isolated environments. You are a
   - `data/parsed/<book_id>/book.docling.json` — complete parse result (chunking works from this file)
   - `data/parsed/<book_id>/book.md` — readable Markdown export, for inspection only
   - `data/chunks/<book_id>/chunks.jsonl` — one chunk per line: text and metadata (including `headings` and `position`)
-  - `data/embeddings/<book_id>/` — optional vector cache
+  - `data/embeddings/<book_id>/` — **required**: `dense.npy` (one float32 vector per chunk, same order as `chunks.jsonl`) and `meta.json` (model, dimension, count, chunk IDs, hash of `chunks.jsonl`); the upload notebook reads it and refuses vectors that do not match the chunks
   - `data/parsed/test/` — scratch folder for manual Docling API tests
   - `data/discussions/` — local design notes
 - The `data/` folder is gitignored and therefore missing after a clone. The script `scripts/init_data.py` (standard library only, safe to re-run) creates the top-level folders if they are absent; the pipeline creates the per-book folders itself (creating parent folders as needed) when a stage writes its output.

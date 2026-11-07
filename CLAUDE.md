@@ -12,6 +12,12 @@ Full requirements: @RAG-requirements.md. User-facing docs: @README.md.
 - Experiments and write tests use a separate test Qdrant collection, not the main one.
 - Notebooks are committed with outputs stripped (`nbstripout`).
 
+## Commands
+- Python: `.venv\Scripts\python.exe` (3.14.7, PyTorch cu128). Tests: `.venv\Scripts\python.exe -m pytest`.
+- Pipeline: `python -m local_rag <parse|chunk|embed> --book <book_id|all> [--force]`; config in `config.yaml`.
+- Folders under `data/`: `py scripts/init_data.py`. Upload notebook: `notebooks/upload-embeddings.ipynb` (regenerate with `scripts/make_upload_notebook.py`).
+- Open design questions and decisions: `data/discussions/embeddings.md` (local, gitignored).
+
 ## Stack
 Qdrant (Docker) · docling-serve (Docker, `gpu`/`cpu` profiles) · `bge-m3` dense+sparse embeddings · reranker · Ollama `qwen3.5:9b` · JupyterLab.
 
