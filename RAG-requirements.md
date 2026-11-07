@@ -33,8 +33,9 @@ Act as an experienced Python developer who uses isolated environments. You are a
 
 ## Multiple books and intermediate files
 - Several PDFs (up to ~10 books, ~8,000 pages in total) are loaded into the same Qdrant collection.
-- Every book has a stable `book_id` (slug set in the config file, or derived from the file name). It is stored as metadata (payload) on every chunk, together with `book_title` (human-readable title, set in the config file, used for citations), `chapter`, `subchapter` and `pages`. `book_id` is an indexed field in Qdrant so queries can be filtered by book; `book_title` is stored but not indexed.
-- Chunk IDs are deterministic (book_id + chapter + sub-chapter + position), so loading the same book twice updates existing points instead of duplicating them. Removing or replacing one book means deleting all points with that `book_id`.
+- Every book has a stable `book_id` (slug set in the config file, or derived from the file name). It is stored as metadata (payload) on every chunk, together with `book_title` (human-readable title, set in the config file, used for citations), `chapter` (first heading), `headings` (the full heading path as a list, any depth; headings also appear in the chunk text before embedding), `pages` and `position` (order of the chunk in the book, used to find neighbouring chunks). There is no `parent_id`. `book_id` and `position` are indexed fields in Qdrant (filter by book, fetch neighbours by range); `book_title` is stored but not indexed. The vector is stored as the named vector `dense`.
+- Chunks are at most 600 tokens, counted with the `bge-m3` tokenizer (config value), with no overlap. Chunks follow section boundaries; neighbouring chunks are added at answer time by the notebook.
+- Chunk IDs are deterministic (book_id + full heading path + position), so loading the same book twice updates existing points instead of duplicating them. Removing or replacing one book means deleting all points with that `book_id`.
 - Docling and Qdrant are not connected to each other. Docling only converts PDFs into files; embeddings are computed by the project's own Python code and uploaded to Qdrant by a notebook.
 - The work is done in two separate phases, and each phase needs only one container:
   1. **Prepare** (only Docling running): stages `parse`, `chunk`, `embed`, each working on one book or on all books. A stage skips books that already have its output, unless forced. Only `parse` calls Docling; `chunk` and `embed` run in Python without any container. Nothing is written to Qdrant in this phase.
@@ -44,21 +45,30 @@ Act as an experienced Python developer who uses isolated environments. You are a
   - `data/pdfs/` — source PDFs
   - `data/parsed/<book_id>/book.docling.json` — complete parse result (chunking works from this file)
   - `data/parsed/<book_id>/book.md` — readable Markdown export, for inspection only
-  - `data/chunks/<book_id>/chunks.jsonl` — one chunk per line: text, metadata, parent ID
+  - `data/chunks/<book_id>/chunks.jsonl` — one chunk per line: text and metadata (including `headings` and `position`)
   - `data/embeddings/<book_id>/` — optional vector cache
+  - `data/parsed/test/` — scratch folder for manual Docling API tests
+  - `data/discussions/` — local design notes
+- The `data/` folder is gitignored and therefore missing after a clone. The script `scripts/init_data.py` (standard library only, safe to re-run) creates the top-level folders if they are absent; the pipeline creates the per-book folders itself (creating parent folders as needed) when a stage writes its output.
 
 ## Jupyter notebook: question answering over the RAG
 - JupyterLab is a dev dependency of the project's virtual environment. The notebook imports the project's own code and config (Qdrant URL, device helper, embedding and reranker wrappers) instead of duplicating it. Notebooks are committed with outputs stripped (e.g. `nbstripout`).
 - The notebook provides a query field where the user types a question, and then runs this flow:
-  1. Embed the query (same model as the chunks: `bge-m3`, dense + sparse).
-  2. Search Qdrant (hybrid) and retrieve the **top 10** most similar chunks.
+  1. Embed the query (same model as the chunks: `bge-m3`, **dense vectors only** for now; sparse vectors and fusion may be added later).
+  2. Search Qdrant (dense search, named vector `dense`) and retrieve the **top 10** most similar chunks.
   3. **Rerank** the 10 results with the reranker model.
   4. Keep the **top 2** reranked chunks as context.
   5. Send the question and the 2 chunks to the Ollama model **`qwen3.5:9b`** to generate the answer.
 - The model's answer is limited to **1000 tokens** (`num_predict: 1000`).
-- System prompt of the model: `You are an experienced ML Engineer that answers questions from RAG. Response should contain "answer" and source list from the RAG metadata response`
-- The response shown in the notebook contains an `answer` and a list of `sources`. The sources are built from the metadata of the 2 chunks used as context (`book_title`, `book_id`, `chapter`, `subchapter`, `pages`).
-- Top-k retrieved (10), top-n after reranking (2), the model name, the token limit and the system prompt are set in the config file, not hard-coded in the notebook.
+- System prompt of the model: `You are an experienced ML Engineer that answers questions from RAG. Response should contain "answer" and source list from the RAG metadata response`, extended with grounding rules. The model:
+  - uses **only** the information from the retrieved chunks (the vector database) and must never guess;
+  - may summarize or combine information from different chunks when appropriate;
+  - must never add anything of its own that is not in the chunks;
+  - says that the answer is not in the books when the chunks do not contain it.
+- Score threshold: the reranker score is normalized to 0-1. If the best reranked chunk scores below **0.7**, the answer is "not found in the books" and the model is not asked to guess. The value is a config setting and can be tuned later with a test question set.
+- Language: the books and the questions are English only.
+- The response shown in the notebook contains an `answer` and a list of `sources`. The sources are built from the metadata of the 2 chunks used as context (`book_title`, `book_id`, `chapter`, `headings`, `pages`).
+- Top-k retrieved (10), top-n after reranking (2), the score threshold (0.7), the model name, the token limit and the system prompt are set in the config file, not hard-coded in the notebook.
 - Embedding model and reranker use CUDA with CPU fallback (shared device helper). The reranker and query embedder may run on the CPU to leave VRAM for the Ollama model.
 - Experiments and write operations use a separate test collection, not the main one.
 

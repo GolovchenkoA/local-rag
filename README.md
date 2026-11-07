@@ -49,9 +49,13 @@ data/
   pdfs/                                  source PDFs
   parsed/<book_id>/book.docling.json     full parse result (chunking works from this)
   parsed/<book_id>/book.md               readable export, for inspection only
-  chunks/<book_id>/chunks.jsonl          one chunk per line: text + metadata
-  embeddings/<book_id>/                  optional vector cache
+  parsed/test/                           scratch folder for manual Docling API tests (raw responses)
+  chunks/<book_id>/chunks.jsonl          one chunk per line: text + metadata (headings, position, ...)
+  embeddings/<book_id>/                  vectors prepared for upload (format still to be decided)
+  discussions/                           local design notes (for example embeddings.md)
 ```
+
+Git does not track empty folders, so this structure does not exist after a clone. Create it with the script in section 4.0 (`py scripts/init_data.py`).
 
 ---
 
@@ -201,18 +205,22 @@ Qdrant data lives in the named Docker volumes `local-rag-qdrant-storage` and `lo
 
 ## 4. Upload a PDF and validate the result
 
-### 4.0 Put your PDFs in `data/pdfs/`
+### 4.0 Create the `data/` folders and put your PDFs in `data/pdfs/`
 
-Copy the source books into the `data/pdfs/` folder in the project root:
+The whole `data/` folder is gitignored (together with all `*.pdf` files), so it exists only on your machine and is missing after a fresh clone. Create the folder structure (see the data layout in section 1) with the script [`scripts/init_data.py`](scripts/init_data.py). It creates only the folders that are absent, so it is safe to run again at any time, and it needs no virtual environment (standard library only):
+
+```powershell
+py scripts/init_data.py
+```
+
+It prints `created` or `exists` for each folder.
+
+The pipeline will create the per-book folders (`data/parsed/<book_id>/`, `data/chunks/<book_id>/`, `data/embeddings/<book_id>/`) by itself when it runs. `data/parsed/test/` is only for manual tests, for example saving a raw Docling API response.
+
+Then copy the source books into `data/pdfs/`:
 
 ```
 data/pdfs/<book>.pdf
-```
-
-The folder is gitignored (like the whole `data/` folder and all `*.pdf` files), so it exists only on your machine. If it is missing after a fresh clone, create it:
-
-```powershell
-New-Item -ItemType Directory -Force data\pdfs
 ```
 
 The `parse` stage (not implemented yet) will read the PDFs from this folder. The `book_id` is set in the config file, or derived from the file name.
