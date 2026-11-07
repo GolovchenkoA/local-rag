@@ -53,7 +53,7 @@ Act as an experienced Python developer who uses isolated environments. You are a
 
 ## Jupyter notebook: question answering over the RAG
 - JupyterLab is a dev dependency of the project's virtual environment. The notebook imports the project's own code and config (Qdrant URL, device helper, embedding and reranker wrappers) instead of duplicating it. Notebooks are committed with outputs stripped (e.g. `nbstripout`).
-- The notebook provides a query field where the user types a question, and then runs this flow:
+- The notebook has a cell with a plain string variable (`question = "..."`) where the user types the question (no input widget); running the cell runs this flow:
   1. Embed the query (same model as the chunks: `bge-m3`, **dense vectors only** for now; sparse vectors and fusion may be added later).
   2. Search Qdrant (dense search, named vector `dense`) and retrieve the **top 10** most similar chunks.
   3. **Rerank** the 10 results with the reranker model.
@@ -67,6 +67,8 @@ Act as an experienced Python developer who uses isolated environments. You are a
   - says that the answer is not in the books when the chunks do not contain it.
 - Score threshold: the reranker score is normalized to 0-1. If the best reranked chunk scores below **0.7**, the answer is "not found in the books" and the model is not asked to guess. The value is a config setting and can be tuned later with a test question set.
 - Language: the books and the questions are English only.
+- The notebook is `notebooks/question-answering.ipynb`; its logic is in `src/local_rag/qa.py`. The response is an `answer` plus the `sources`, built from the chunk metadata by code (not written by the model). The notebook also shows the searched chunks with their scores and the text of the chunks sent to the model.
+- Optional `neighbor_window` setting (default 0 = off): also send the chunks at `position` +/- N that belong to the same section (same `headings` path).
 - The response shown in the notebook contains an `answer` and a list of `sources`. The sources are built from the metadata of the 2 chunks used as context (`book_title`, `book_id`, `chapter`, `headings`, `pages`).
 - Top-k retrieved (10), top-n after reranking (2), the score threshold (0.7), the model name, the token limit and the system prompt are set in the config file, not hard-coded in the notebook.
 - Embedding model and reranker use CUDA with CPU fallback (shared device helper). The reranker and query embedder may run on the CPU to leave VRAM for the Ollama model.

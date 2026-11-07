@@ -24,10 +24,12 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_model(cfg: SimpleNamespace):
+def load_model(cfg: SimpleNamespace, device_setting: str | None = None):
+    """Load the embedding model. device_setting (auto|cuda|cpu) overrides the config."""
     from sentence_transformers import SentenceTransformer
 
-    device = resolve_device(getattr(cfg.embedding, "device", None) or cfg.device)
+    setting = device_setting or getattr(cfg.embedding, "device", None) or cfg.device
+    device = resolve_device(setting)
     model = SentenceTransformer(cfg.embedding.model, device=device)
     model.max_seq_length = cfg.embedding.max_seq_length
     return model

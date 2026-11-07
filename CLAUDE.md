@@ -15,11 +15,12 @@ Full requirements: @RAG-requirements.md. User-facing docs: @README.md.
 ## Commands
 - Python: `.venv\Scripts\python.exe` (3.14.7, PyTorch cu128). Tests: `.venv\Scripts\python.exe -m pytest`.
 - Pipeline: `python -m local_rag <parse|chunk|embed> --book <book_id|all> [--force]`; config in `config.yaml`.
+- Question answering: `notebooks/question-answering.ipynb` (code in `src/local_rag/qa.py`, settings in `config.yaml` section `qa`; regenerate with `scripts/make_qa_notebook.py`).
 - Folders under `data/`: `py scripts/init_data.py`. Upload notebook: `notebooks/upload-embeddings.ipynb` (regenerate with `scripts/make_upload_notebook.py`).
 - Open design questions and decisions: `data/discussions/embeddings.md` (local, gitignored).
 
 ## Stack
-Qdrant (Docker) · docling-serve (Docker, `gpu`/`cpu` profiles) · `bge-m3` dense+sparse embeddings · reranker · Ollama `qwen3.5:9b` · JupyterLab.
+Qdrant (Docker) · docling-serve (Docker, `gpu`/`cpu` profiles) · `bge-m3` dense embeddings (sparse later if needed) · reranker · Ollama `qwen3.5:9b` · JupyterLab.
 
 ## Environment
 Windows 11, PowerShell. Target hardware: i9-14900HX, 32 GB RAM, RTX 5060 Laptop 8 GB (PyTorch CUDA 12.8+).

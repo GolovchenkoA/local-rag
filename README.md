@@ -15,7 +15,7 @@ Ask questions about technical PDF books and get answers with sources. Everything
 | Python project, virtual environment, config file | ✅ Done (`pyproject.toml`, `config.yaml`, `.venv`) |
 | Phase 1 pipeline: `parse` → `chunk` → `embed` (files in `data/`) | ✅ Code done; run on the first book (see section 4.2) |
 | Phase 2: `upload-embeddings.ipynb` (upload to Qdrant) | ✅ Notebook written, **not run yet** (nothing uploaded) |
-| Jupyter notebook for questions and answers | 🚧 Not implemented yet |
+| Jupyter notebook for questions and answers (`notebooks/question-answering.ipynb`) | ✅ Written and tested end to end with `qwen3.5:9b` (see 5.1); the score threshold still needs tuning |
 
 ---
 
@@ -119,7 +119,7 @@ All components try CUDA first and fall back to the CPU if it is not available (`
 ollama pull qwen3.5:9b
 ```
 
-The embedding model `BAAI/bge-m3` (about 2.2 GB) is downloaded by Python code from Hugging Face on the first `embed` run. The reranker is not used yet (🚧 question answering notebook not implemented yet).
+The embedding model `BAAI/bge-m3` (about 2.2 GB) is downloaded by Python code from Hugging Face on the first `embed` run. The reranker `BAAI/bge-reranker-v2-m3` (about 2.3 GB) is downloaded the same way on the first run of the question answering notebook.
 
 ### 2.4 Configuration file
 
@@ -357,20 +357,38 @@ The notebook targets the **test collection** (`rag_test`) by default and has a s
 
 ## 5. Run the project
 
-### 5.1 Jupyter notebook (questions and answers) 🚧 Not implemented yet
+### 5.1 Jupyter notebook (questions and answers)
 
-Planned flow:
+The notebook is [`notebooks/question-answering.ipynb`](notebooks/question-answering.ipynb). The code is in [`src/local_rag/qa.py`](src/local_rag/qa.py) and every value comes from the `qa` section of [`config.yaml`](config.yaml).
 
-1. Start the Docker services (section 3) and Ollama.
-2. Activate the virtual environment and start JupyterLab.
-3. Open the notebook and type a question in the query field.
-4. The notebook retrieves the top 10 chunks, reranks them, keeps the top 2, and asks `qwen3.5:9b` (answer limited to 1000 tokens).
-5. The result contains an `answer` and a list of `sources` (from the chunk metadata).
+**Before you start**
+1. Qdrant is running and the collection is filled (`docker compose up -d qdrant`, then `upload-embeddings.ipynb`, section 4.3). Docling is not needed.
+2. Ollama is running and the model is pulled: `ollama pull qwen3.5:9b` (6.6 GB).
+3. Open the notebook (see section 4.3 for the `python -m jupyter lab` command and the Windows notes).
+
+**What it does when you run a question** (set `question = "..."` in section 2 of the notebook and run the cell)
+
+1. The question is embedded with `bge-m3` (dense vector, same model as the chunks).
+2. Qdrant returns the **top 10** most similar chunks.
+3. The reranker (`BAAI/bge-reranker-v2-m3`) scores the 10 chunks; the score is normalized to 0-1.
+4. The **top 2** chunks are kept as context. Optionally `neighbor_window` adds the chunks before and after each one when they are in the same section (default 0 = off).
+5. If the best score is below `score_threshold` the answer is *"The answer is not in the books."* and the model is **not** called.
+6. Otherwise the question and the chunks go to the Ollama model (`num_predict: 1000` tokens). The system prompt tells the model to use only the chunks, never guess, and say so when the answer is missing.
+
+The notebook shows an `answer`, the `sources` (built from the chunk metadata: `book_title`, `book_id`, `chapter`, `headings`, `pages`, not written by the model) and a table of all 10 searched chunks with their rerank and vector scores. The last cell prints the full text of the chunks behind the last answer.
+
+**Tested** (first book, `rag_test` collection, query embedder and reranker on the CPU, model `qwen3.5:9b`, test run with the threshold lowered to 0.3):
+- Search plus rerank take about 6 seconds. The model call took about 30 seconds the first time (the model is loaded into memory) and about 6 seconds afterwards.
+- "What are CNNs?" and "How can I handle a categorical feature with very many distinct values?" both got answers grounded in the two chunks (prompts of 871 and 1021 tokens, answers of 101 and 147 tokens, finished normally, so the 1000-token limit was not reached). `think: false` is accepted.
+- An off-topic question ("Who won the football world cup in 2018?") scored 0.002 and was answered "The answer is not in the books." without calling the model.
+- The model starts its answer with "answer:" and sometimes adds its own "Sources: Chunk [1], [2]" line (the system prompt says the response should contain "answer" and a source list). The `sources` list built from the metadata is the reliable one.
+
+**Known issue: the 0.7 threshold is too strict for this reranker.** Questions that the book does answer scored 0.68 ("What are CNNs?") and 0.52 ("How can I handle a categorical feature with very many distinct values?"), so both would be answered "not in the books", while the off-topic question scored 0.002. The gap suggests a threshold of roughly 0.3 to 0.4, but the value should be chosen with a set of test questions (open question #15). Change `qa.score_threshold` in `config.yaml`.
 
 ### 5.2 Tips for the 8 GB GPU
 
 - Unload the chat model while ingesting books, so Docling and the embedder get the whole GPU: `ollama stop qwen3.5:9b`.
-- When asking questions, the query embedder and reranker can run on the CPU, which leaves the VRAM to the answering model.
+- When asking questions, the query embedder and reranker run on the CPU by default (`qa.embedder_device`, `qa.reranker_device`), which leaves the VRAM to the answering model.
 
 ---
 
