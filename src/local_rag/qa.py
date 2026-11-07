@@ -10,6 +10,7 @@ Everything tunable comes from config.yaml (qa section). Nothing runs on import.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -176,6 +177,34 @@ def ask_ollama(cfg: SimpleNamespace, messages: list[dict],
             "prompt_tokens": data.get("prompt_eval_count"),
             "answer_tokens": data.get("eval_count"),
             "done_reason": data.get("done_reason")}
+
+
+# Two empty lines in rendered Markdown (plain blank lines would collapse into one).
+SPACER = "\n\n&nbsp;\n\n&nbsp;\n\n"
+_LABEL = re.compile(r"(\(\s*)?\b(answers?|sources?)\s*:[ \t]*", re.IGNORECASE)
+
+
+def format_answer(text: str) -> str:
+    """Display form of the model's reply: after "answer:" and "source(s):" the text starts on
+    a new line, and "Sources:" is separated from the answer by two empty lines."""
+    text = text.strip()
+    had_paren = False
+
+    def repl(m: re.Match) -> str:
+        nonlocal had_paren
+        label = "Answer" if m.group(2).lower().startswith("answer") else "Sources"
+        had_paren = had_paren or bool(m.group(1))
+        if m.start() == 0:
+            head = ""
+        else:
+            head = SPACER if label == "Sources" else "\n\n"
+        return f"{head}**{label}:**\n\n"
+
+    out = _LABEL.sub(repl, text)
+    if had_paren and out.endswith(")"):
+        out = out[:-1].rstrip()          # the "(" before "Source:" was removed, drop its ")"
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    return re.sub(r"\n{3,}", "\n\n", out)      # blank lines are made by SPACER, not by repeats
 
 
 @dataclass

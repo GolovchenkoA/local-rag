@@ -99,9 +99,11 @@ def ask(question: str):
     result = qa.answer_question(question, cfg, client, COLLECTION, embedder, reranker)
     last_result = result
 
-    lines = [f"**Question:** {question}", "", "### Answer", "", result.answer, ""]
+    # format_answer(): text after "answer:" / "sources:" starts on a new line, "Sources:" is
+    # separated from the answer by two empty lines.
+    lines = [f"**Question:** {question}", "", "### Answer", "", qa.format_answer(result.answer), ""]
     if result.found:
-        lines += ["### Sources", ""]
+        lines += ["&nbsp;", "", "&nbsp;", "", "### Sources", ""]     # two empty lines, then sources
         for s in result.sources:
             pages = ", ".join(str(p) for p in s["pages"])
             lines.append(f"- *{s['book_title']}* (`{s['book_id']}`) - {s['chapter']} > "

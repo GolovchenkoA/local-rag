@@ -57,6 +57,29 @@ def test_sources_from_uses_metadata_and_drops_duplicates():
                           "headings": ["Chapter 1", "Intro"], "pages": [10]}
 
 
+def test_format_answer_starts_text_after_answer_label_on_a_new_line():
+    assert qa.format_answer("answer: CNNs are models.") == "**Answer:**\n\nCNNs are models."
+
+
+def test_format_answer_separates_sources_with_two_empty_lines():
+    out = qa.format_answer("answer: A.\n\nSources:\n- Chunk [1], pages 75-76")
+    assert out == ("**Answer:**\n\nA.\n\n&nbsp;\n\n&nbsp;\n\n"
+                   "**Sources:**\n\n- Chunk [1], pages 75-76")
+    assert out.count("&nbsp;") == 2          # two empty lines
+    assert out.index("**Answer:**") < out.index("&nbsp;") < out.index("**Sources:**")
+
+
+def test_format_answer_handles_inline_source_in_parentheses():
+    out = qa.format_answer("answer: CNNs learn hierarchically. (Source: Chunks [1], [2])")
+    assert out.endswith("**Sources:**\n\nChunks [1], [2]")
+    assert "(" not in out.split("**Sources:**")[1] and not out.endswith(")")
+    assert out.startswith("**Answer:**\n\nCNNs learn hierarchically.")
+
+
+def test_format_answer_leaves_plain_text_alone():
+    assert qa.format_answer("  The answer is not in the books.  ") == "The answer is not in the books."
+
+
 def test_ask_ollama_sends_limits_and_parses_reply():
     sent = {}
 
