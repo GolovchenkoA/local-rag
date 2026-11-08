@@ -9,6 +9,7 @@ Everything tunable comes from config.yaml (qa section). Nothing runs on import.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -163,20 +164,53 @@ def sources_from(context: list[Hit]) -> list[dict]:
 
 
 def ask_ollama(cfg: SimpleNamespace, messages: list[dict],
-               post: Callable = httpx.post) -> dict:
+               post: Callable = httpx.post,
+               on_token: Callable[[str], None] | None = None,
+               stream_lines: Callable | None = None) -> dict:
+    """Call Ollama. With on_token, the reply is streamed and on_token(text) is called for
+    every piece as it arrives; the returned dict is the same in both modes."""
     o = cfg.qa.ollama
-    resp = post(
-        o.url.rstrip("/") + "/api/chat",
-        json={"model": o.model, "messages": messages, "stream": False, "think": o.think,
-              "options": {"num_predict": o.num_predict, "num_ctx": o.num_ctx}},
-        timeout=o.timeout_seconds,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return {"text": data["message"]["content"].strip(),
-            "prompt_tokens": data.get("prompt_eval_count"),
-            "answer_tokens": data.get("eval_count"),
-            "done_reason": data.get("done_reason")}
+    url = o.url.rstrip("/") + "/api/chat"
+    body = {"model": o.model, "messages": messages, "stream": on_token is not None,
+            "think": o.think, "options": {"num_predict": o.num_predict, "num_ctx": o.num_ctx}}
+    for key in ("keep_alive",):
+        if getattr(o, key, None) is not None:
+            body[key] = getattr(o, key)
+    for key in ("temperature", "seed"):
+        if getattr(o, key, None) is not None:
+            body["options"][key] = getattr(o, key)
+
+    if on_token is None:
+        resp = post(url, json=body, timeout=o.timeout_seconds)
+        resp.raise_for_status()
+        data = resp.json()
+        return {"text": data["message"]["content"].strip(),
+                "prompt_tokens": data.get("prompt_eval_count"),
+                "answer_tokens": data.get("eval_count"),
+                "done_reason": data.get("done_reason")}
+
+    parts: list[str] = []
+    final: dict = {}
+    for line in (stream_lines or _stream_lines)(url, body, o.timeout_seconds):
+        if not line.strip():
+            continue
+        data = json.loads(line)
+        piece = data.get("message", {}).get("content", "")
+        if piece:
+            parts.append(piece)
+            on_token(piece)
+        if data.get("done"):
+            final = data
+    return {"text": "".join(parts).strip(),
+            "prompt_tokens": final.get("prompt_eval_count"),
+            "answer_tokens": final.get("eval_count"),
+            "done_reason": final.get("done_reason")}
+
+
+def _stream_lines(url: str, body: dict, timeout: float):
+    with httpx.stream("POST", url, json=body, timeout=timeout) as resp:
+        resp.raise_for_status()
+        yield from resp.iter_lines()
 
 
 # Two empty lines in rendered Markdown (plain blank lines would collapse into one).
@@ -224,7 +258,8 @@ class Result:
 
 
 def answer_question(question: str, cfg: SimpleNamespace, client: QdrantClient,
-                    collection: str, embedder, reranker) -> Result:
+                    collection: str, embedder, reranker,
+                    on_token: Callable[[str], None] | None = None) -> Result:
     qa = cfg.qa
     t = {}
     t0 = time.perf_counter()
@@ -247,6 +282,6 @@ def answer_question(question: str, cfg: SimpleNamespace, client: QdrantClient,
 
     context = expand_neighbors(client, cfg, collection, selected, qa.neighbor_window)
     t0 = time.perf_counter()
-    llm = ask_ollama(cfg, build_messages(cfg, question, context))
+    llm = ask_ollama(cfg, build_messages(cfg, question, context), on_token=on_token)
     t["llm"] = time.perf_counter() - t0
     return Result(question, llm["text"], sources_from(selected), True, ranked, context, t, llm)

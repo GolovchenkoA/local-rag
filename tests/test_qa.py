@@ -98,3 +98,21 @@ def test_ask_ollama_sends_limits_and_parses_reply():
     assert sent["json"]["options"] == {"num_predict": 50, "num_ctx": 1000}
     assert sent["json"]["think"] is False and sent["json"]["stream"] is False
     assert out == {"text": "hello", "prompt_tokens": 7, "answer_tokens": 3, "done_reason": "stop"}
+
+
+def test_ask_ollama_streams_tokens_to_callback():
+    lines = ['{"message": {"content": "Hel"}, "done": false}',
+             '',
+             '{"message": {"content": "lo"}, "done": false}',
+             '{"message": {"content": ""}, "done": true, "done_reason": "stop", '
+             '"prompt_eval_count": 7, "eval_count": 2}']
+    sent, pieces = {}, []
+
+    def fake_lines(url, body, timeout):
+        sent.update(url=url, body=body)
+        return iter(lines)
+
+    out = qa.ask_ollama(CFG, [{"role": "user", "content": "q"}], on_token=pieces.append,
+                        stream_lines=fake_lines)
+    assert sent["body"]["stream"] is True and pieces == ["Hel", "lo"]
+    assert out == {"text": "Hello", "prompt_tokens": 7, "answer_tokens": 2, "done_reason": "stop"}

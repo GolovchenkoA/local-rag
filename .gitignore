@@ -24,3 +24,5 @@ qdrant_data/
 *.onnx
 *.egg-info/
 .pytest_cache/
+
+.ipynb_checkpoints/

@@ -15,8 +15,8 @@ Full requirements: @RAG-requirements.md. User-facing docs: @README.md.
 ## Commands
 - Python: `.venv\Scripts\python.exe` (3.14.7, PyTorch cu128). Tests: `.venv\Scripts\python.exe -m pytest`.
 - Pipeline: `python -m local_rag <parse|chunk|embed> --book <book_id|all> [--force]`; config in `config.yaml`.
-- Question answering: `notebooks/question-answering.ipynb` (code in `src/local_rag/qa.py`, settings in `config.yaml` section `qa`; regenerate with `scripts/make_qa_notebook.py`).
-- Folders under `data/`: `py scripts/init_data.py`. Upload notebook: `notebooks/upload-embeddings.ipynb` (regenerate with `scripts/make_upload_notebook.py`).
+- Question answering: `notebooks/question-answering.ipynb` (code in `src/local_rag/qa.py`, settings in `config.yaml` section `qa`). Notebooks are edited directly, not generated.
+- Folders under `data/`: `py scripts/init_data.py`. Upload notebook: `notebooks/upload-embeddings.ipynb`.
 - Open design questions and decisions: `data/discussions/embeddings.md` (local, gitignored).
 
 ## Stack

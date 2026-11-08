@@ -62,7 +62,7 @@ books:
 
 # --- Question answering notebook (notebooks/question-answering.ipynb) ----------
 qa:
-  retrieve_top_k: 10            # chunks returned by the vector search
+  retrieve_top_k: 5            # chunks returned by the vector search
   rerank_top_n: 2               # chunks kept after reranking and sent to the LLM
   neighbor_window: 0            # also send N chunks before/after each kept chunk (same section); 0 = off
   score_threshold: 0.7          # normalized reranker score (0-1); best chunk below it: "not found"
@@ -78,6 +78,9 @@ qa:
     num_predict: 1000           # answer limit in tokens
     num_ctx: 6144               # to be confirmed; must fit chunks + question + answer
     think: false                # do not spend the answer tokens on hidden reasoning
+    keep_alive: 10m             # keep the model loaded in memory this long after each call
+    temperature: 0              # 0 = always the most likely next token (same answer every time)
+    seed: 42                    # fixed random seed, used together with the temperature
     timeout_seconds: 300
   system_prompt: >-
     You are an experienced ML Engineer that answers questions from RAG.
